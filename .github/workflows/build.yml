@@ -20,151 +20,152 @@ jobs:
         echo "--- Building Pure Spaces OS ---"
         mkdir -p tools seed
         cat << 'EOF' > tools/build_os.py
-from pathlib import Path
-class Asm:
-    def __init__(self):
-        self.buf=bytearray(); self.labels={}; self.fixups=[]
-    def emit(self,*bs): self.buf.extend(bs)
-    def label(self,name): self.labels[name]=len(self.buf)
-    def jcc8(self,opcode,label):
-        pos=len(self.buf); self.buf.extend([opcode,0]); self.fixups.append((pos+1,label,8))
-    def jmp8(self,label): self.jcc8(0xEB,label)
-    def jmp16(self,label):
-        pos=len(self.buf); self.buf.extend([0xE9,0,0]); self.fixups.append((pos+1,label,16))
-    def resolve(self):
-        for pos,label,size in self.fixups:
-            target=self.labels[label]
-            if size==8: self.buf[pos]=(target-(pos+1))&0xFF
-            elif size==16:
-                rel=target-(pos+2); self.buf[pos]=rel&0xFF; self.buf[pos+1]=(rel>>8)&0xFF
-        return bytes(self.buf)
-def build_mbr():
-    return b'\xFA\x31\xC0\x8E\xD8\x8E\xC0\x8E\xD0\xBC\x00\x7C\xFB\x88\x16\x00\x05\xB4\x02\xB0\x02\xB5\x00\xB1\x02\xB6\x00\x8A\x16\x00\x05\xBB\x00\x7E\xCD\x13\x73\x0B\xB4\x0E\xB0\x45\xCD\x10\xFA\xF4\xEB\xFE\x90\xEA\x00\x7E\x00\x00'.ljust(510,b'\x00')+b'\x55\xAA'
-def build_stage2():
-    s=Asm()
-    s.emit(0xFA,0x31,0xC0,0x8E,0xD8,0x8E,0xC0,0xBA,0xF9,0x03,0xB0,0x00,0xEE,0xBA,0xFB,0x03,0xB0,0x80,0xEE,0xBA,0xF8,0x03,0xB0,0x03,0xEE,0xBA,0xF9,0x03,0xB0,0x00,0xEE,0xBA,0xFB,0x03,0xB0,0x03,0xEE,0xBA,0xFA,0x03,0xB0,0xC7,0xEE,0xBA,0xFC,0x03,0xB0,0x0B,0xEE)
-    s.label("repl_start"); s.label("wait_gt")
-    s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_gt")
-    s.emit(0xB0,0x3E,0xBA,0xF8,0x03,0xEE)
-    s.label("wait_spc"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_spc")
-    s.emit(0xB0,0x20,0xBA,0xF8,0x03,0xEE,0xBF,0x00,0x80)
-    s.label("load_op")
-    s.emit(0x31,0xDB,0xB9,0x04,0x00) # 4 bits for custom ISA!
-    s.label("read_char"); s.label("wait_rx1")
-    s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"wait_rx1"); s.emit(0xBA,0xF8,0x03,0xEC)
-    s.emit(0x3C,0x0A); s.jcc8(0x74,"do_vm_init")
-    s.emit(0x3C,0x0D); s.jcc8(0x74,"do_vm_init")
-    s.emit(0x08,0xC0); s.jcc8(0x75,"chk_half")
-    s.label("do_vm_init"); s.jmp16("vm_init")
-    s.label("chk_half")
-    s.emit(0x3C,0x20); s.jcc8(0x74,"bit_zero")
-    s.emit(0x3C,0xE3); s.jcc8(0x75,"read_char")
-    s.label("wait_rx2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"wait_rx2"); s.emit(0xBA,0xF8,0x03,0xEC)
-    s.label("wait_rx3"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"wait_rx3"); s.emit(0xBA,0xF8,0x03,0xEC)
-    s.emit(0xD1,0xE3,0x83,0xCB,0x01); s.jmp8("bit_done")
-    s.label("bit_zero"); s.emit(0xD1,0xE3)
-    s.label("bit_done")
-    s.emit(0x49,0x09,0xC9); s.jcc8(0x75,"read_char")
-    s.emit(0x88,0x1D,0x47); s.jmp16("load_op")
-    
-    s.label("vm_init"); s.label("wait_cr1")
-    s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_cr1"); s.emit(0xB0,0x0D,0xBA,0xF8,0x03,0xEE)
-    s.label("wait_lf1")
-    s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_lf1"); s.emit(0xB0,0x0A,0xBA,0xF8,0x03,0xEE)
-    s.emit(0xB0,0xFF,0xAA,0xBF,0x00,0x10,0xB9,0x00,0x30,0x31,0xC0,0xF3,0xAA,0xBE,0x00,0x80,0xBD,0x00,0x10)
-    
-    s.label("fetch"); s.emit(0x8A,0x04,0x46)
-    s.emit(0x3C,0x00); s.jcc8(0x75,"chk_1"); s.emit(0x83,0xC5,0x02,0x3E,0xC7,0x46,0x00,0x00,0x00); s.jmp16("fetch") # PUSH_0
-    s.label("chk_1"); s.emit(0x3C,0x01); s.jcc8(0x75,"chk_2"); s.emit(0x3E,0xFF,0x46,0x00); s.jmp16("fetch") # INC
-    s.label("chk_2"); s.emit(0x3C,0x02); s.jcc8(0x75,"chk_3"); s.emit(0x3E,0xD1,0x66,0x00); s.jmp16("fetch") # SHL
-    s.label("chk_3"); s.emit(0x3C,0x03); s.jcc8(0x75,"chk_4"); s.emit(0x3E,0x83,0x4E,0x00,0x01); s.jmp16("fetch") # OR_1
-    s.label("chk_4"); s.emit(0x3C,0x04); s.jcc8(0x75,"chk_5"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xC5,0x02,0x3E,0x89,0x46,0x00); s.jmp16("fetch") # DUP
-    s.label("chk_5"); s.emit(0x3C,0x05); s.jcc8(0x75,"chk_6"); s.emit(0x83,0xED,0x02); s.jmp16("fetch") # POP
-    s.label("chk_6"); s.emit(0x3C,0x06); s.jcc8(0x75,"chk_7"); s.emit(0x3E,0x8B,0x5E,0x00,0x31,0xC0,0x3E,0x8A,0x07,0x3E,0x89,0x46,0x00); s.jmp16("fetch") # LOAD
-    s.label("chk_7"); s.emit(0x3C,0x07); s.jcc8(0x75,"chk_8"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x8B,0x5E,0x00,0x83,0xED,0x02,0x3E,0x88,0x07); s.jmp16("fetch") # STORE
-    s.label("chk_8"); s.emit(0x3C,0x08); s.jcc8(0x75,"chk_9"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x01,0x46,0x00); s.jmp16("fetch") # ADD
-    s.label("chk_9"); s.emit(0x3C,0x09); s.jcc8(0x75,"chk_A"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x29,0x46,0x00); s.jmp16("fetch") # SUB
-    s.label("chk_A"); s.emit(0x3C,0x0A); s.jcc8(0x75,"chk_B"); s.emit(0x3E,0x8B,0x5E,0x00,0x83,0xED,0x02,0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x85,0xC0); s.jcc8(0x75,"skip_jz"); s.emit(0x89,0xDE,0x81,0xC6,0x00,0x80); s.label("skip_jz"); s.jmp16("fetch") # JZ
-    s.label("chk_B"); s.emit(0x3C,0x0B); s.jcc8(0x75,"chk_C"); s.emit(0x3E,0x8B,0x76,0x00,0x83,0xED,0x02,0x81,0xC6,0x00,0x80); s.jmp16("fetch") # JMP
-    s.label("chk_C"); s.emit(0x3C,0x0C); s.jcc8(0x75,"chk_D"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02); s.label("tx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"tx_w"); s.emit(0xBA,0xF8,0x03,0xEE); s.jmp16("fetch") # OUT
-    s.label("chk_D"); s.emit(0x3C,0x0D); s.jcc8(0x75,"chk_E"); s.label("rx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"rx_w"); s.emit(0xBA,0xF8,0x03,0xEC,0x83,0xC5,0x02,0x31,0xE4,0x3E,0x89,0x46,0x00); s.jmp16("fetch") # IN
-    s.label("chk_E"); s.emit(0x3C,0x0E); s.jcc8(0x75,"chk_F"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.jmp16("fetch") # R_PUSH
-    s.label("chk_F"); s.emit(0x3C,0x0F); s.jcc8(0x75,"end_exec"); s.label("wait_cr2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_cr2"); s.emit(0xB0,0x0D,0xBA,0xF8,0x03,0xEE); s.label("wait_lf2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_lf2"); s.emit(0xB0,0x0A,0xBA,0xF8,0x03,0xEE); s.jmp16("repl_start") # HALT
-    s.label("end_exec"); s.jmp16("fetch")
-    return s.resolve().ljust(1024,b'\x00')
-if __name__=="__main__":
-    img=build_mbr()+build_stage2()
-    Path("seed/voidos_compiler.img").write_bytes(img.ljust(10*1024*1024,b'\x00'))
-EOF
+        from pathlib import Path
+        class Asm:
+            def __init__(self):
+                self.buf=bytearray(); self.labels={}; self.fixups=[]
+            def emit(self,*bs): self.buf.extend(bs)
+            def label(self,name): self.labels[name]=len(self.buf)
+            def jcc8(self,opcode,label):
+                pos=len(self.buf); self.buf.extend([opcode,0]); self.fixups.append((pos+1,label,8))
+            def jmp8(self,label): self.jcc8(0xEB,label)
+            def jmp16(self,label):
+                pos=len(self.buf); self.buf.extend([0xE9,0,0]); self.fixups.append((pos+1,label,16))
+            def resolve(self):
+                for pos,label,size in self.fixups:
+                    target=self.labels[label]
+                    if size==8: self.buf[pos]=(target-(pos+1))&0xFF
+                    elif size==16:
+                        rel=target-(pos+2); self.buf[pos]=rel&0xFF; self.buf[pos+1]=(rel>>8)&0xFF
+                return bytes(self.buf)
+        def build_mbr():
+            return b'\xFA\x31\xC0\x8E\xD8\x8E\xC0\x8E\xD0\xBC\x00\x7C\xFB\x88\x16\x00\x05\xB4\x02\xB0\x02\xB5\x00\xB1\x02\xB6\x00\x8A\x16\x00\x05\xBB\x00\x7E\xCD\x13\x73\x0B\xB4\x0E\xB0\x45\xCD\x10\xFA\xF4\xEB\xFE\x90\xEA\x00\x7E\x00\x00'.ljust(510,b'\x00')+b'\x55\xAA'
+        def build_stage2():
+            s=Asm()
+            s.emit(0xFA,0x31,0xC0,0x8E,0xD8,0x8E,0xC0,0xBA,0xF9,0x03,0xB0,0x00,0xEE,0xBA,0xFB,0x03,0xB0,0x80,0xEE,0xBA,0xF8,0x03,0xB0,0x03,0xEE,0xBA,0xF9,0x03,0xB0,0x00,0xEE,0xBA,0xFB,0x03,0xB0,0x03,0xEE,0xBA,0xFA,0x03,0xB0,0xC7,0xEE,0xBA,0xFC,0x03,0xB0,0x0B,0xEE)
+            s.label("repl_start"); s.label("wait_gt")
+            s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_gt")
+            s.emit(0xB0,0x3E,0xBA,0xF8,0x03,0xEE)
+            s.label("wait_spc"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_spc")
+            s.emit(0xB0,0x20,0xBA,0xF8,0x03,0xEE,0xBF,0x00,0x80)
+            s.label("load_op")
+            s.emit(0x31,0xDB,0xB9,0x04,0x00)
+            s.label("read_char"); s.label("wait_rx1")
+            s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"wait_rx1"); s.emit(0xBA,0xF8,0x03,0xEC)
+            s.emit(0x3C,0x0A); s.jcc8(0x74,"do_vm_init")
+            s.emit(0x3C,0x0D); s.jcc8(0x74,"do_vm_init")
+            s.emit(0x08,0xC0); s.jcc8(0x75,"chk_half")
+            s.label("do_vm_init"); s.jmp16("vm_init")
+            s.label("chk_half")
+            s.emit(0x3C,0x20); s.jcc8(0x74,"bit_zero")
+            s.emit(0x3C,0xE3); s.jcc8(0x75,"read_char")
+            s.label("wait_rx2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"wait_rx2"); s.emit(0xBA,0xF8,0x03,0xEC)
+            s.label("wait_rx3"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"wait_rx3"); s.emit(0xBA,0xF8,0x03,0xEC)
+            s.emit(0xD1,0xE3,0x83,0xCB,0x01); s.jmp8("bit_done")
+            s.label("bit_zero"); s.emit(0xD1,0xE3)
+            s.label("bit_done")
+            s.emit(0x49,0x09,0xC9); s.jcc8(0x75,"read_char")
+            s.emit(0x88,0x1D,0x47); s.jmp16("load_op")
+            s.label("vm_init"); s.label("wait_cr1")
+            s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_cr1"); s.emit(0xB0,0x0D,0xBA,0xF8,0x03,0xEE)
+            s.label("wait_lf1")
+            s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_lf1"); s.emit(0xB0,0x0A,0xBA,0xF8,0x03,0xEE)
+            s.emit(0xB0,0xFF,0xAA,0xBF,0x00,0x10,0xB9,0x00,0x30,0x31,0xC0,0xF3,0xAA,0xBE,0x00,0x80,0xBD,0x00,0x10)
+            s.label("fetch"); s.emit(0x8A,0x04,0x46)
+            s.emit(0x3C,0x00); s.jcc8(0x75,"chk_1"); s.emit(0x83,0xC5,0x02,0x3E,0xC7,0x46,0x00,0x00,0x00); s.jmp16("fetch")
+            s.label("chk_1"); s.emit(0x3C,0x01); s.jcc8(0x75,"chk_2"); s.emit(0x3E,0xFF,0x46,0x00); s.jmp16("fetch")
+            s.label("chk_2"); s.emit(0x3C,0x02); s.jcc8(0x75,"chk_3"); s.emit(0x3E,0xD1,0x66,0x00); s.jmp16("fetch")
+            s.label("chk_3"); s.emit(0x3C,0x03); s.jcc8(0x75,"chk_4"); s.emit(0x3E,0x83,0x4E,0x00,0x01); s.jmp16("fetch")
+            s.label("chk_4"); s.emit(0x3C,0x04); s.jcc8(0x75,"chk_5"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xC5,0x02,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
+            s.label("chk_5"); s.emit(0x3C,0x05); s.jcc8(0x75,"chk_6"); s.emit(0x83,0xED,0x02); s.jmp16("fetch")
+            s.label("chk_6"); s.emit(0x3C,0x06); s.jcc8(0x75,"chk_7"); s.emit(0x3E,0x8B,0x5E,0x00,0x31,0xC0,0x3E,0x8A,0x07,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
+            s.label("chk_7"); s.emit(0x3C,0x07); s.jcc8(0x75,"chk_8"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x8B,0x5E,0x00,0x83,0xED,0x02,0x3E,0x88,0x07); s.jmp16("fetch")
+            s.label("chk_8"); s.emit(0x3C,0x08); s.jcc8(0x75,"chk_9"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x01,0x46,0x00); s.jmp16("fetch")
+            s.label("chk_9"); s.emit(0x3C,0x09); s.jcc8(0x75,"chk_A"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x29,0x46,0x00); s.jmp16("fetch")
+            s.label("chk_A"); s.emit(0x3C,0x0A); s.jcc8(0x75,"chk_B"); s.emit(0x3E,0x8B,0x5E,0x00,0x83,0xED,0x02,0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x85,0xC0); s.jcc8(0x75,"skip_jz"); s.emit(0x89,0xDE,0x81,0xC6,0x00,0x80); s.label("skip_jz"); s.jmp16("fetch")
+            s.label("chk_B"); s.emit(0x3C,0x0B); s.jcc8(0x75,"chk_C"); s.emit(0x3E,0x8B,0x76,0x00,0x83,0xED,0x02,0x81,0xC6,0x00,0x80); s.jmp16("fetch")
+            s.label("chk_C"); s.emit(0x3C,0x0C); s.jcc8(0x75,"chk_D"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.label("tx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"tx_w"); s.emit(0x58,0xBA,0xF8,0x03,0xEE); s.jmp16("fetch")
+            s.label("chk_D"); s.emit(0x3C,0x0D); s.jcc8(0x75,"chk_E"); s.label("rx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"rx_w"); s.emit(0xBA,0xF8,0x03,0xEC,0x83,0xC5,0x02,0x31,0xE4,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
+            s.label("chk_E"); s.emit(0x3C,0x0E); s.jcc8(0x75,"chk_F"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.jmp16("fetch")
+            s.label("chk_F"); s.emit(0x3C,0x0F); s.jcc8(0x75,"end_exec"); s.label("wait_cr2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_cr2"); s.emit(0xB0,0x0D,0xBA,0xF8,0x03,0xEE); s.label("wait_lf2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_lf2"); s.emit(0xB0,0x0A,0xBA,0xF8,0x03,0xEE); s.jmp16("repl_start")
+            s.label("end_exec"); s.jmp16("fetch")
+            return s.resolve().ljust(1024,b'\x00')
+        if __name__=="__main__":
+            img=build_mbr()+build_stage2()
+            Path("seed/voidos_compiler.img").write_bytes(img.ljust(10*1024*1024,b'\x00'))
+        EOF
         python3 tools/build_os.py
 
     - name: 3. Forge the "Pure Spaces Native Compiler"
       run: |
         echo "--- Building Spaces-to-Spaces Compiler ---"
         cat << 'EOF' > tools/gen_compiler_stack.py
-import sys
-class A:
-    def __init__(self):
-        self.o=[]; self.l={}; self.f=[]
-    def emit(self,c): self.o.append(c)
-    def pv(self,n):
-        if n==0: self.emit(0); return
-        b=bin(n)[2:]; self.emit(0); self.emit(1)
-        for x in b[1:]:
-            self.emit(2)
-            if x=='1': self.emit(3)
-    def lb(self,n): self.l[n]=len(self.o)
-    def pr(self,n):
-        p=len(self.o)
-        for _ in range(33): self.emit(0)
-        self.f.append((p,n))
-    def res(self):
-        for p,n in self.f:
-            d=self.l[n]; pt=[0]
-            for i in range(15,-1,-1):
-                pt.append(2)
-                if (d>>i)&1: pt.append(3)
-                else: pt.append(0)
-            for i in range(33): self.o[p+i]=pt[i]
-a=A()
-a.pv(4); a.pv(0); a.emit(7)
-a.pv(0); a.pv(1); a.emit(7)
-a.lb("L"); a.emit(13); a.emit(4); a.pv(0); a.emit(9); a.pr("H"); a.emit(10)
-a.emit(4); a.pv(0x20); a.emit(9); a.pr("H1"); a.emit(10)
-a.emit(4); a.pv(0xE3); a.emit(9); a.pr("H2"); a.emit(10)
-a.emit(5); a.pr("L"); a.emit(11)
-a.lb("H1"); a.emit(5); a.pv(1); a.emit(6); a.emit(2); a.pv(1); a.emit(7)
-a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.pv(0); a.emit(7); a.pr("C"); a.emit(11)
-a.lb("H2"); a.emit(5); a.emit(13); a.emit(5); a.emit(13); a.emit(5)
-a.pv(1); a.emit(6); a.emit(2); a.emit(3); a.pv(1); a.emit(7)
-a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.pv(0); a.emit(7); a.pr("C"); a.emit(11)
-a.lb("C"); a.pv(0); a.emit(6); a.pr("E"); a.emit(10); a.pr("L"); a.emit(11)
-a.lb("E"); a.pv(1); a.emit(6); a.emit(12); a.pv(4); a.pv(0); a.emit(7)
-a.pv(0); a.pv(1); a.emit(7); a.pr("L"); a.emit(11)
-a.lb("H"); a.emit(5); a.emit(15)
-a.res()
-sys.stdout.buffer.write(bytes(a.o))
-EOF
+        import sys
+        class A:
+            def __init__(self):
+                self.o=[]; self.l={}; self.f=[]
+            def emit(self,c): self.o.append(c)
+            def pv(self,n):
+                if n==0: self.emit(0); return
+                b=bin(n)[2:]; self.emit(0); self.emit(1)
+                for x in b[1:]:
+                    self.emit(2)
+                    if x=='1': self.emit(3)
+            def lb(self,n): self.l[n]=len(self.o)
+            def pr(self,n):
+                p=len(self.o)
+                for _ in range(33): self.emit(0)
+                self.f.append((p,n))
+            def res(self):
+                for p,n in self.f:
+                    d=self.l[n]; pt=[0]
+                    for i in range(15,-1,-1):
+                        pt.append(2)
+                        if (d>>i)&1: pt.append(3)
+                        else: pt.append(0)
+                    for i in range(33): self.o[p+i]=pt[i]
+        a=A()
+        a.pv(4); a.pv(0); a.emit(7)
+        a.pv(0); a.pv(1); a.emit(7)
+        a.lb("L"); a.emit(13); a.emit(4); a.pv(0); a.emit(9); a.pr("H"); a.emit(10)
+        a.emit(4); a.pv(0x20); a.emit(9); a.pr("H1"); a.emit(10)
+        a.emit(4); a.pv(0xE3); a.emit(9); a.pr("H2"); a.emit(10)
+        a.emit(5); a.pr("L"); a.emit(11)
+        a.lb("H1"); a.emit(5); a.pv(1); a.emit(6); a.emit(2); a.pv(1); a.emit(7)
+        a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.pv(0); a.emit(7); a.pr("C"); a.emit(11)
+        a.lb("H2"); a.emit(5); a.emit(13); a.emit(5); a.emit(13); a.emit(5)
+        a.pv(1); a.emit(6); a.emit(2); a.emit(3); a.pv(1); a.emit(7)
+        a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.pv(0); a.emit(7); a.pr("C"); a.emit(11)
+        a.lb("C"); a.pv(0); a.emit(6); a.pr("E"); a.emit(10); a.pr("L"); a.emit(11)
+        a.lb("E"); a.pv(1); a.emit(6); a.emit(12); a.pv(4); a.pv(0); a.emit(7)
+        a.pv(0); a.pv(1); a.emit(7); a.pr("L"); a.emit(11)
+        a.lb("H"); a.emit(5); a.emit(15)
+        a.res()
+        sys.stdout.buffer.write(bytes(a.o))
+        EOF
+        
         cat << 'EOF' > tools/stack_to_spaces.py
-import sys
-c=sys.stdin.buffer.read()
-for v in c:
-    sys.stdout.write("\u3000" if (v>>3)&1 else " ")
-    sys.stdout.write("\u3000" if (v>>2)&1 else " ")
-    sys.stdout.write("\u3000" if (v>>1)&1 else " ")
-    sys.stdout.write("\u3000" if v&1 else " ")
-EOF
+        import sys
+        c=sys.stdin.buffer.read()
+        for v in c:
+            sys.stdout.write("\u3000" if (v>>3)&1 else " ")
+            sys.stdout.write("\u3000" if (v>>2)&1 else " ")
+            sys.stdout.write("\u3000" if (v>>1)&1 else " ")
+            sys.stdout.write("\u3000" if v&1 else " ")
+        EOF
+        
         cat << 'EOF' > tools/spaces_to_bin.py
-import sys
-src=sys.stdin.buffer.read()
-out=bytearray(); i=0; bits=[]
-while i<len(src):
-    if src[i:i+3]==b'\xe3\x80\x80': bits.append(1); i+=3
-    elif src[i:i+1]==b' ': bits.append(0); i+=1
-    else: i+=1
-    if len(bits)==4: out.append((bits[0]<<3)|(bits[1]<<2)|(bits[2]<<1)|bits[3]); bits=[]
-sys.stdout.buffer.write(out)
-EOF
+        import sys
+        src=sys.stdin.buffer.read()
+        out=bytearray(); i=0; bits=[]
+        while i<len(src):
+            if src[i:i+3]==b'\xe3\x80\x80': bits.append(1); i+=3
+            elif src[i:i+1]==b' ': bits.append(0); i+=1
+            else: i+=1
+            if len(bits)==4: out.append((bits[0]<<3)|(bits[1]<<2)|(bits[2]<<1)|bits[3]); bits=[]
+        sys.stdout.buffer.write(out)
+        EOF
+        
         python3 tools/gen_compiler_stack.py > compiler.bin
         python3 tools/stack_to_spaces.py < compiler.bin > compiler.spaces
         python3 tools/spaces_to_bin.py < compiler.spaces > reference_compiler.bin
@@ -178,7 +179,7 @@ EOF
       run: |
         set -euo pipefail
         echo "=== Executing The Absolute Void ==="
-        # 実行速度が数千倍（O(N)）になったため、速度制限(pv -L)を解放！
+        # 実行速度が爆上がり（数千倍）したため、通信速度を上げても溢れません！
         (sleep 2; pv -q -L 5000 payload_boot.spaces; sleep 1; pv -q -L 5000 payload_src.spaces) | timeout 30 qemu-system-x86_64 \
           -display none \
           -serial stdio \
@@ -189,15 +190,19 @@ EOF
         od -v -t x1 serial.bin | head -n 30
 
         cat << 'EOF' > tools/extract_bin.py
-import sys
-data=open("serial.bin", "rb").read()
-start=data.find(b"> \r\n")
-if start==-1: sys.exit(1)
-start+=4
-end=data.rfind(b"\r\n> ")
-if end==-1 or start>=end: sys.exit(1)
-open("voidos_compiled.bin","wb").write(data[start:end])
-EOF
+        import sys
+        data=open("serial.bin", "rb").read()
+        start=data.find(b"> \r\n")
+        if start==-1:
+            print("❌ FAILED to find start sequence")
+            sys.exit(1)
+        start+=4
+        end=data.rfind(b"\r\n> ")
+        if end==-1 or start>=end:
+            print("❌ FAILED to find end sequence")
+            sys.exit(1)
+        open("voidos_compiled.bin","wb").write(data[start:end])
+        EOF
         python3 tools/extract_bin.py
 
         echo "=== SHA-256 Hash Matching ==="

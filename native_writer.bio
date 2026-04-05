@@ -1,0 +1,131 @@
+; native_writer.bio -- minimal "copy output.bin -> output.exe" program for BioVM
+; 要旨: 出力バイナリ（output.bin）を開き、output.exe を作成して中身を丸ごと書き出す。
+; bootstrap_fixed.py の ReadFile / WriteFile の利用パターンを踏襲しています。
+
+[GENOME]
+; ワーク変数
+H_IN        = 0
+H_OUT       = 0
+BYTES_IO    = 0   ; pointer/slot used by ReadFile / WriteFile for bytes read/written
+FILE_BUF    = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+IDX         = 0
+CUR_BYTE    = 0
+TEMP        = 0
+
+STRINGS
+NAME_IN     = "output.bin"
+NAME_OUT    = "output.exe"
+
+[NUCLEUS]
+; -----------------------
+; 1) Open input file (output.bin) for read
+; -----------------------
+ENCODE 0
+ENCODE 128
+ENCODE 3
+ENCODE 0
+ENCODE 0
+ENCODE -2147483648
+ENCODE_ADDR NAME_IN
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_IN
+STORE
+
+; check H_IN != INVALID_HANDLE_VALUE (-1)
+ENCODE_ADDR H_IN
+LOAD
+MATCH -1
+JUMP_EQ FAIL_OPEN_IN
+
+; -----------------------
+; 2) Create/truncate output file (output.exe) for write
+;    (use same flags pattern as bootstrap does for creation)
+; -----------------------
+ENCODE 0
+ENCODE 128
+ENCODE 2
+ENCODE 0
+ENCODE 0
+ENCODE 1073741824    ; CREATE_ALWAYS + desired flags used by bootstrap
+ENCODE_ADDR NAME_OUT
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_OUT
+STORE
+
+; check H_OUT != INVALID_HANDLE_VALUE (-1)
+ENCODE_ADDR H_OUT
+LOAD
+MATCH -1
+JUMP_EQ FAIL_OPEN_OUT
+
+; -----------------------
+; 3) Copy loop: ReadFile -> if 0 bytes then finish -> WriteFile
+;    (uses the same calling idiom as in bootstrap_fixed.py)
+; -----------------------
+MARKER COPY_LOOP
+
+; Read chunk: ReadFile( hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped )
+; pattern used: ENCODE 0 (overlapped) ENCODE_ADDR BYTES_IO (lpNumberOfBytesRead) ENCODE 32768 (n) ENCODE_ADDR FILE_BUF (lpBuffer) ENCODE_ADDR H_IN LOAD EXPRESS ReadFile
+ENCODE 0
+ENCODE_ADDR BYTES_IO
+ENCODE 32768
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_IN
+LOAD
+EXPRESS ReadFile
+
+; After ReadFile, check BYTES_IO (the place where ReadFile wrote the bytes-read)
+ENCODE_ADDR BYTES_IO
+LOAD
+MATCH 0
+JUMP_EQ FINISH_COPY
+
+; Write the exact number of bytes read:
+; WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped)
+; Following bootstrap idiom, we push lpOverlapped(0), lpNumberOfBytesWritten(pointer), nNumberOfBytesToWrite (value),
+; lpBuffer (pointer), hFile (value) LOAD then call WriteFile.
+; To pass the variable nNumberOfBytesToWrite we use: ENCODE_ADDR BYTES_IO  LOAD  (this pushes the numeric value read),
+; but depending on your compile_instruction semantics you might need to replace this with ENCODE <const> or other pattern.
+ENCODE 0
+ENCODE_ADDR BYTES_IO        ; lpNumberOfBytesWritten (address)
+ENCODE_ADDR BYTES_IO
+LOAD                       ; *attempt to push the numeric value stored in BYTES_IO (nNumberOfBytesToWrite)
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_OUT
+LOAD
+EXPRESS WriteFile
+
+; Loop
+JUMP COPY_LOOP
+
+; -----------------------
+; 4) Finish / Cleanup
+; -----------------------
+MARKER FINISH_COPY
+ENCODE_ADDR H_IN
+LOAD
+EXPRESS CloseHandle
+ENCODE_ADDR H_OUT
+LOAD
+EXPRESS CloseHandle
+
+ENCODE 0
+EXPRESS ExitProcess
+
+; -----------------------
+; 5) Error paths
+; -----------------------
+MARKER FAIL_OPEN_IN
+; could print error code here (via EXPRESS_INT etc), but just exit non-zero
+ENCODE 1
+EXPRESS_INT 0
+ENCODE 1
+EXPRESS ExitProcess
+
+MARKER FAIL_OPEN_OUT
+ENCODE 2
+EXPRESS_INT 0
+ENCODE 1
+EXPRESS ExitProcess

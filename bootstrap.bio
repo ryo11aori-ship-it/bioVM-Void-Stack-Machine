@@ -1,0 +1,273 @@
+[GENOME]
+; Bootstrap in BioVM
+; Modes:
+;  - transcribe: copy compiler_v14_bitpacker.bio -> compiler.dna
+;  - ribosome:   (temporary) copy compiler.dna -> biovm_compiler.exe
+; NOTE: This is a best-effort staged implementation:
+;       transcribe is fully implemented. ribosome currently does a raw copy;
+;       to reach full self-hosting the ribosome section needs PE assembly logic.
+
+PAD_0       = 0
+H_MODE      = 0
+H_IN        = 0
+H_OUT       = 0
+BYTES_IO    = 0
+IDX         = 0
+CUR_BYTE    = 0
+VAL         = 0
+TEMP        = 0
+BUF_PTR     = 0
+
+STRINGS
+NAME_MODE      = "mode.txt"
+NAME_SRC_BIO   = "compiler_v14_bitpacker.bio"
+NAME_DST_DNA   = "compiler.dna"
+NAME_SRC_DNA   = "compiler.dna"
+NAME_DST_EXE   = "biovm_compiler.exe"
+FILE_BUF       = "000000000000000000000000000000000000000000000000000000000000" ; 64B buffer
+
+[NUCLEUS]
+
+; ----------------------
+; Helper: open file for read (NAME at top of file) -> handle in H_IN
+; push: NAME (address) is provided via ENCODE_ADDR then EXPRESS CreateFileA sequence
+; pattern uses same calling sequence as other .bio examples:
+; GENERIC_READ = 0x80000000 (-2147483648 as signed)
+; ----------------------
+
+; Try to open mode file to decide operation (mode.txt)
+ENCODE 0
+ENCODE 128
+ENCODE 3
+ENCODE 0
+ENCODE 0
+ENCODE -2147483648
+ENCODE_ADDR NAME_MODE
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_MODE
+STORE
+ENCODE_ADDR H_MODE
+LOAD
+MATCH -1
+JUMP_EQ MODE_NOT_FOUND
+
+; read up to 64 bytes from mode file into FILE_BUF
+ENCODE 0
+ENCODE_ADDR BYTES_IO
+ENCODE 64
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_MODE
+LOAD
+EXPRESS ReadFile
+
+; if read 0 bytes -> treat as MODE_NOT_FOUND
+ENCODE_ADDR BYTES_IO
+LOAD
+MATCH 0
+JUMP_EQ MODE_NOT_FOUND
+
+; check first byte of FILE_BUF to see 't' (transcribe) or 'r' (ribosome)
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR IDX
+ENCODE 0
+STORE           ; IDX = 0
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR IDX
+LOAD
+ADD
+LOAD_B
+ENCODE_ADDR CUR_BYTE
+STORE_B
+
+ENCODE_ADDR CUR_BYTE
+LOAD_B
+MATCH 116    ; 't' -> transcribe
+JUMP_EQ DO_TRANSCRIBE
+ENCODE_ADDR CUR_BYTE
+LOAD_B
+MATCH 114    ; 'r' -> ribosome
+JUMP_EQ DO_RIBOSOME
+
+; fallback if mode.txt present but unknown -> MODE_NOT_FOUND
+JUMP MODE_NOT_FOUND
+
+MODE_NOT_FOUND
+; if mode file missing or unknown, default to 'ribosome' behavior (safe choice)
+JUMP DO_RIBOSOME
+
+; =========================
+; DO_TRANSCRIBE : copy NAME_SRC_BIO -> NAME_DST_DNA
+; =========================
+MARKER DO_TRANSCRIBE
+
+; Open source (read)
+ENCODE 0
+ENCODE 128
+ENCODE 3
+ENCODE 0
+ENCODE 0
+ENCODE -2147483648
+ENCODE_ADDR NAME_SRC_BIO
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_IN
+STORE
+ENCODE_ADDR H_IN
+LOAD
+MATCH -1
+JUMP_EQ TRANS_FAIL
+
+; Create destination (write, CREATE_ALWAYS)
+; CREATE_ALWAYS = 2
+ENCODE 0
+ENCODE 0
+ENCODE 2
+ENCODE 0
+ENCODE 0
+ENCODE 0
+ENCODE_ADDR NAME_DST_DNA
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_OUT
+STORE
+ENCODE_ADDR H_OUT
+LOAD
+MATCH -1
+JUMP_EQ TRANS_FAIL
+
+; Copy loop: read chunks and write
+MARKER TRANS_LOOP
+ENCODE 0
+ENCODE_ADDR BYTES_IO
+ENCODE 4096
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_IN
+LOAD
+EXPRESS ReadFile
+
+; BYTES_IO now contains bytes read
+ENCODE_ADDR BYTES_IO
+LOAD
+MATCH 0
+JUMP_EQ TRANS_DONE
+
+; Write to output
+ENCODE 0
+ENCODE_ADDR BYTES_IO
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_OUT
+LOAD
+EXPRESS WriteFile
+
+; loop
+JUMP TRANS_LOOP
+
+MARKER TRANS_DONE
+; Close handles
+ENCODE_ADDR H_IN
+LOAD
+EXPRESS CloseHandle
+ENCODE_ADDR H_OUT
+LOAD
+EXPRESS CloseHandle
+
+; ExitProcess(0)
+ENCODE 0
+EXPRESS_INT 0
+ENCODE 0
+EXPRESS ExitProcess
+
+MARKER TRANS_FAIL
+; something failed -> ExitProcess(1)
+ENCODE 70
+EXPRESS_INT 0
+ENCODE 1
+EXPRESS ExitProcess
+
+; =========================
+; DO_RIBOSOME : temporary implementation:
+;   copy NAME_SRC_DNA -> NAME_DST_EXE (placeholder for real PE assembly)
+; =========================
+MARKER DO_RIBOSOME
+
+; Open source DNA
+ENCODE 0
+ENCODE 128
+ENCODE 3
+ENCODE 0
+ENCODE 0
+ENCODE -2147483648
+ENCODE_ADDR NAME_SRC_DNA
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_IN
+STORE
+ENCODE_ADDR H_IN
+LOAD
+MATCH -1
+JUMP_EQ RIB_FAIL
+
+; Create destination EXE (WRITE + CREATE_ALWAYS)
+ENCODE 0
+ENCODE 0
+ENCODE 2
+ENCODE 0
+ENCODE 0
+ENCODE 0
+ENCODE_ADDR NAME_DST_EXE
+EXPRESS CreateFileA
+RETRO
+ENCODE_ADDR H_OUT
+STORE
+ENCODE_ADDR H_OUT
+LOAD
+MATCH -1
+JUMP_EQ RIB_FAIL
+
+; Simple copy loop (placeholder)
+MARKER RIB_LOOP
+ENCODE 0
+ENCODE_ADDR BYTES_IO
+ENCODE 4096
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_IN
+LOAD
+EXPRESS ReadFile
+
+ENCODE_ADDR BYTES_IO
+LOAD
+MATCH 0
+JUMP_EQ RIB_DONE
+
+ENCODE 0
+ENCODE_ADDR BYTES_IO
+ENCODE_ADDR FILE_BUF
+ENCODE_ADDR H_OUT
+LOAD
+EXPRESS WriteFile
+
+JUMP RIB_LOOP
+
+MARKER RIB_DONE
+ENCODE_ADDR H_IN
+LOAD
+EXPRESS CloseHandle
+ENCODE_ADDR H_OUT
+LOAD
+EXPRESS CloseHandle
+
+; ExitProcess(0)
+ENCODE 0
+EXPRESS_INT 0
+ENCODE 0
+EXPRESS ExitProcess
+
+MARKER RIB_FAIL
+; failure -> ExitProcess(2)
+ENCODE 70
+EXPRESS_INT 0
+ENCODE 2
+EXPRESS ExitProcess
+
+; End

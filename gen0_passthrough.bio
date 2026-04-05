@@ -1,0 +1,5 @@
+[NUCLEUS]
+; stdin をそのまま stdout に流す
+; OS 側のリダイレクトに任せる
+
+TERMINATE

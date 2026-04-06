@@ -106,19 +106,16 @@ jobs:
         class A:
             def __init__(self): self.o=[]; self.l={}; self.f=[]
             def emit(self,c): self.o.append(c)
-            # PUSHする数値を生成
             def pv(self,n):
                 self.emit(0)
                 for i in range(15,-1,-1):
                     self.emit(2)
                     self.emit(3 if (n>>i)&1 else 14)
             def lb(self,n): self.l[n]=len(self.o)
-            # ラベルへの参照を生成（固定長）
             def pr(self,n):
                 p=len(self.o)
                 for _ in range(33): self.emit(0)
                 self.f.append((p,n))
-            # アドレス解決
             def res(self):
                 for p,n in self.f:
                     d=self.l[n]
@@ -127,41 +124,33 @@ jobs:
                         self.o[p+1+i*2]=2
                         self.o[p+2+i*2]=3 if (d>>(15-i))&1 else 14
         a=A()
-        # [重要修正] STOREの引数順は「アドレス」が先、「値」が後！
-        a.pv(0); a.pv(4); a.emit(7) # mem[0] = 4
-        a.pv(1); a.pv(0); a.emit(7) # mem[1] = 0
-        
-        a.lb("L"); a.emit(13) # IN
-        a.emit(4); a.pv(0); a.emit(9); a.pr("H"); a.emit(10) # if char-0 == 0 jmp H
-        a.emit(4); a.pv(0x20); a.emit(9); a.pr("H1"); a.emit(10) # if char-0x20 == 0 jmp H1
-        a.emit(4); a.pv(0xE3); a.emit(9); a.pr("H2"); a.emit(10) # if char-0xE3 == 0 jmp H2
-        a.emit(5); a.pr("L"); a.emit(11) # POP char, JMP L
-
+        a.pv(0); a.pv(4); a.emit(7)
+        a.pv(1); a.pv(0); a.emit(7)
+        a.lb("L"); a.emit(13)
+        a.emit(4); a.pv(0); a.emit(9); a.pr("H"); a.emit(10)
+        a.emit(4); a.pv(0x20); a.emit(9); a.pr("H1"); a.emit(10)
+        a.emit(4); a.pv(0xE3); a.emit(9); a.pr("H2"); a.emit(10)
+        a.emit(5); a.pr("L"); a.emit(11)
         a.lb("H1")
-        a.emit(5) # POP char
-        a.pv(1); a.pv(1); a.emit(6); a.emit(2); a.emit(7) # mem[1] = mem[1]<<1
-        a.pv(0); a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.emit(7) # mem[0] -= 1
+        a.emit(5)
+        a.pv(1); a.pv(1); a.emit(6); a.emit(2); a.emit(7)
+        a.pv(0); a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.emit(7)
         a.pr("C"); a.emit(11)
-
         a.lb("H2")
-        a.emit(5); a.emit(13); a.emit(5); a.emit(13); a.emit(5) # skip utf8 trail
-        a.pv(1); a.pv(1); a.emit(6); a.emit(2); a.emit(3); a.emit(7) # mem[1] = (mem[1]<<1)|1
-        a.pv(0); a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.emit(7) # mem[0] -= 1
+        a.emit(5); a.emit(13); a.emit(5); a.emit(13); a.emit(5)
+        a.pv(1); a.pv(1); a.emit(6); a.emit(2); a.emit(3); a.emit(7)
+        a.pv(0); a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.emit(7)
         a.pr("C"); a.emit(11)
-
         a.lb("C")
-        a.pv(0); a.emit(6); a.pr("E"); a.emit(10) # if mem[0]==0 jmp E
+        a.pv(0); a.emit(6); a.pr("E"); a.emit(10)
         a.pr("L"); a.emit(11)
-
         a.lb("E")
-        a.pv(1); a.emit(6); a.emit(12) # OUT mem[1]
-        a.pv(0); a.pv(4); a.emit(7) # mem[0] = 4
-        a.pv(1); a.pv(0); a.emit(7) # mem[1] = 0
+        a.pv(1); a.emit(6); a.emit(12)
+        a.pv(0); a.pv(4); a.emit(7)
+        a.pv(1); a.pv(0); a.emit(7)
         a.pr("L"); a.emit(11)
-
         a.lb("H")
-        a.emit(5); a.emit(15) # POP char, HALT
-        
+        a.emit(5); a.emit(15)
         a.res()
         sys.stdout.buffer.write(bytes(a.o))
         EOF
@@ -201,14 +190,15 @@ jobs:
       run: |
         set -euo pipefail
         echo "=== Executing The Absolute Void ==="
-        (sleep 2; pv -q -L 5000 payload_boot.spaces; sleep 1; pv -q -L 5000 payload_src.spaces) | timeout 180 qemu-system-x86_64 \
+        # 物理的なバッファ溢れを防ぐため、安全な速度（100バイト/秒）に固定！
+        (sleep 2; pv -q -L 100 payload_boot.spaces; sleep 1; pv -q -L 100 payload_src.spaces) | timeout 180 qemu-system-x86_64 \
           -display none \
           -serial stdio \
           -drive file=seed/voidos_compiler.img,format=raw,index=0,media=disk \
           > serial.bin || true
 
         echo "--- Hex Dump of COM1 Serial Output ---"
-        od -v -t x1 serial.bin | head -n 30
+        od -v -t x1 serial.bin | head -n 100
 
         cat << 'EOF' > tools/extract_bin.py
         import sys

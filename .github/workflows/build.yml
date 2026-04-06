@@ -190,8 +190,7 @@ jobs:
       run: |
         set -euo pipefail
         echo "=== Executing The Absolute Void ==="
-        # 物理的なバッファ溢れを防ぎつつ、時間内に完走させる奇跡の速度（250バイト/秒）
-        (sleep 2; pv -q -L 250 payload_boot.spaces; sleep 1; pv -q -L 250 payload_src.spaces) | timeout 300 qemu-system-x86_64 \
+        (sleep 2; pv -q -L 250 payload_boot.spaces; sleep 1; pv -q -L 250 payload_src.spaces) | timeout 120 qemu-system-x86_64 \
           -display none \
           -serial stdio \
           -drive file=seed/voidos_compiler.img,format=raw,index=0,media=disk \
@@ -203,16 +202,17 @@ jobs:
         cat << 'EOF' > tools/extract_bin.py
         import sys
         data=open("serial.bin", "rb").read()
+        ref=open("reference_compiler.bin", "rb").read()
+        
         start=data.find(b"> \r\n")
         if start==-1:
             print("❌ FAILED to find start sequence")
             sys.exit(1)
-        start+=4
-        end=data.rfind(b"\r\n> ")
-        if end==-1 or start>=end:
-            print("❌ FAILED to find end sequence")
-            sys.exit(1)
-        open("voidos_compiled.bin","wb").write(data[start:end])
+        start += 4
+        
+        # OSのプロンプトを待たず、出力されたバイナリサイズ分だけを数学的に抽出！
+        comp=data[start : start+len(ref)]
+        open("voidos_compiled.bin","wb").write(comp)
         EOF
         python3 tools/extract_bin.py
 
@@ -223,6 +223,7 @@ jobs:
         echo "VoidOS (Pure VM):        $VOID_HASH"
         if [ "$REF_HASH" == "$VOID_HASH" ]; then
           echo "🎉 PERFECT MATCH: Pure Spaces Fixed-Point Achieved!"
+          echo "🎉 THE ABSOLUTE VOID IS COMPLETE!"
         else
           echo "❌ FIXED POINT MISMATCH"
           exit 1

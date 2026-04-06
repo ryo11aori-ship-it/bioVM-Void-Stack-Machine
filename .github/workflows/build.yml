@@ -84,7 +84,9 @@ jobs:
             s.label("chk_9"); s.emit(0x3C,0x09); s.jcc8(0x75,"chk_A"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x29,0x46,0x00); s.jmp16("fetch")
             s.label("chk_A"); s.emit(0x3C,0x0A); s.jcc8(0x75,"chk_B"); s.emit(0x3E,0x8B,0x5E,0x00,0x83,0xED,0x02,0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x85,0xC0); s.jcc8(0x75,"skip_jz"); s.emit(0x89,0xDE,0x81,0xC6,0x00,0x80); s.label("skip_jz"); s.jmp16("fetch")
             s.label("chk_B"); s.emit(0x3C,0x0B); s.jcc8(0x75,"chk_C"); s.emit(0x3E,0x8B,0x76,0x00,0x83,0xED,0x02,0x81,0xC6,0x00,0x80); s.jmp16("fetch")
-            s.label("chk_C"); s.emit(0x3C,0x0C); s.jcc8(0x75,"chk_D"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.label("tx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"tx_w"); s.emit(0x58,0xBA,0xF8,0x03,0xEE); s.jmp16("fetch")
+            
+            s.label("chk_C"); s.emit(0x3C,0x0C); s.jcc8(0x75,"chk_D"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.label("tx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"tx_w"); s.emit(0x58,0xBA,0xF8,0x03,0xEE); s.jmp16("fetch") # OUT (AL破壊バグをPUSH/POPで完全修復！)
+            
             s.label("chk_D"); s.emit(0x3C,0x0D); s.jcc8(0x75,"chk_E"); s.label("rx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"rx_w"); s.emit(0xBA,0xF8,0x03,0xEC,0x83,0xC5,0x02,0x31,0xE4,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
             s.label("chk_E"); s.emit(0x3C,0x0E); s.jcc8(0x75,"chk_F"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.jmp16("fetch")
             s.label("chk_F"); s.emit(0x3C,0x0F); s.jcc8(0x75,"end_exec"); s.label("wait_cr2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_cr2"); s.emit(0xB0,0x0D,0xBA,0xF8,0x03,0xEE); s.label("wait_lf2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_lf2"); s.emit(0xB0,0x0A,0xBA,0xF8,0x03,0xEE); s.jmp16("repl_start")
@@ -102,28 +104,34 @@ jobs:
         cat << 'EOF' > tools/gen_compiler_stack.py
         import sys
         class A:
-            def __init__(self):
-                self.o=[]; self.l={}; self.f=[]
-            def emit(self,c): self.o.append(c)
-            def pv(self,n):
-                if n==0: self.emit(0); return
-                b=bin(n)[2:]; self.emit(0); self.emit(1)
-                for x in b[1:]:
-                    self.emit(2)
-                    if x=='1': self.emit(3)
-            def lb(self,n): self.l[n]=len(self.o)
-            def pr(self,n):
-                p=len(self.o)
-                for _ in range(33): self.emit(0)
-                self.f.append((p,n))
+            def __init__(self): self.i=[]; self.l={}
+            def emit(self,c): self.i.append(('O',c))
+            def pv(self,n): self.i.append(('V',n))
+            def lb(self,n): self.i.append(('L',n))
+            def pr(self,n): self.i.append(('R',n))
             def res(self):
-                for p,n in self.f:
-                    d=self.l[n]; pt=[0]
-                    for i in range(15,-1,-1):
-                        pt.append(2)
-                        if (d>>i)&1: pt.append(3)
-                        else: pt.append(0)
-                    for i in range(33): self.o[p+i]=pt[i]
+                while 1:
+                    a=0; c=0
+                    for t,v in self.i:
+                        if t=='L':
+                            if self.l.get(v)!=a: self.l[v]=a; c=1
+                        elif t=='O': a+=1
+                        else:
+                            val=v if t=='V' else self.l.get(v,0)
+                            a+=1 if val==0 else 2+len(bin(val))-3+bin(val).count('1')-1
+                    if not c: break
+                o=[]
+                for t,v in self.i:
+                    if t=='O': o.append(v)
+                    elif t in 'VR':
+                        val=v if t=='V' else self.l[v]
+                        if val==0: o.append(0)
+                        else:
+                            b=bin(val)[2:]; o.extend([0,1])
+                            for x in b[1:]:
+                                o.append(2)
+                                if x=='1': o.append(3)
+                return bytes(o)
         a=A()
         a.pv(4); a.pv(0); a.emit(7)
         a.pv(0); a.pv(1); a.emit(7)
@@ -140,8 +148,7 @@ jobs:
         a.lb("E"); a.pv(1); a.emit(6); a.emit(12); a.pv(4); a.pv(0); a.emit(7)
         a.pv(0); a.pv(1); a.emit(7); a.pr("L"); a.emit(11)
         a.lb("H"); a.emit(5); a.emit(15)
-        a.res()
-        sys.stdout.buffer.write(bytes(a.o))
+        sys.stdout.buffer.write(a.res())
         EOF
         
         cat << 'EOF' > tools/stack_to_spaces.py
@@ -179,7 +186,6 @@ jobs:
       run: |
         set -euo pipefail
         echo "=== Executing The Absolute Void ==="
-        # 実行速度が爆上がり（数千倍）したため、通信速度を上げても溢れません！
         (sleep 2; pv -q -L 5000 payload_boot.spaces; sleep 1; pv -q -L 5000 payload_src.spaces) | timeout 30 qemu-system-x86_64 \
           -display none \
           -serial stdio \

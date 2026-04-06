@@ -191,7 +191,7 @@ jobs:
         set -euo pipefail
         echo "=== Executing The Absolute Void ==="
         # 物理的なバッファ溢れを防ぐため、安全な速度（100バイト/秒）に固定！
-        (sleep 2; pv -q -L 100 payload_boot.spaces; sleep 1; pv -q -L 100 payload_src.spaces) | timeout 180 qemu-system-x86_64 \
+        (sleep 2; pv -q -L 100 payload_boot.spaces; sleep 1; pv -q -L 100 payload_src.spaces) | timeout 300 qemu-system-x86_64 \
           -display none \
           -serial stdio \
           -drive file=seed/voidos_compiler.img,format=raw,index=0,media=disk \

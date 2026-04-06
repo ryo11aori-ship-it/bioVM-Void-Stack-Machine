@@ -80,18 +80,14 @@ jobs:
             s.label("chk_3"); s.emit(0x3C,0x03); s.jcc8(0x75,"chk_4"); s.emit(0x3E,0x83,0x4E,0x00,0x01); s.jmp16("fetch")
             s.label("chk_4"); s.emit(0x3C,0x04); s.jcc8(0x75,"chk_5"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xC5,0x02,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
             s.label("chk_5"); s.emit(0x3C,0x05); s.jcc8(0x75,"chk_6"); s.emit(0x83,0xED,0x02); s.jmp16("fetch")
-            # LOAD (IVT破壊防止パッチ: +0x1000)
             s.label("chk_6"); s.emit(0x3C,0x06); s.jcc8(0x75,"chk_7"); s.emit(0x3E,0x8B,0x5E,0x00,0x81,0xC3,0x00,0x10,0x31,0xC0,0x3E,0x8A,0x07,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
-            # STORE (IVT破壊防止パッチ: +0x1000)
             s.label("chk_7"); s.emit(0x3C,0x07); s.jcc8(0x75,"chk_8"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x8B,0x5E,0x00,0x81,0xC3,0x00,0x10,0x83,0xED,0x02,0x3E,0x88,0x07); s.jmp16("fetch")
             s.label("chk_8"); s.emit(0x3C,0x08); s.jcc8(0x75,"chk_9"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x01,0x46,0x00); s.jmp16("fetch")
             s.label("chk_9"); s.emit(0x3C,0x09); s.jcc8(0x75,"chk_A"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x3E,0x29,0x46,0x00); s.jmp16("fetch")
             s.label("chk_A"); s.emit(0x3C,0x0A); s.jcc8(0x75,"chk_B"); s.emit(0x3E,0x8B,0x5E,0x00,0x83,0xED,0x02,0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x85,0xC0); s.jcc8(0x75,"skip_jz"); s.emit(0x89,0xDE,0x81,0xC6,0x00,0x80); s.label("skip_jz"); s.jmp16("fetch")
             s.label("chk_B"); s.emit(0x3C,0x0B); s.jcc8(0x75,"chk_C"); s.emit(0x3E,0x8B,0x76,0x00,0x83,0xED,0x02,0x81,0xC6,0x00,0x80); s.jmp16("fetch")
-            # OUT (レジスタ破壊防止パッチ: PUSH/POP)
             s.label("chk_C"); s.emit(0x3C,0x0C); s.jcc8(0x75,"chk_D"); s.emit(0x3E,0x8B,0x46,0x00,0x83,0xED,0x02,0x50); s.label("tx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"tx_w"); s.emit(0x58,0xBA,0xF8,0x03,0xEE); s.jmp16("fetch")
             s.label("chk_D"); s.emit(0x3C,0x0D); s.jcc8(0x75,"chk_E"); s.label("rx_w"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x01); s.jcc8(0x74,"rx_w"); s.emit(0xBA,0xF8,0x03,0xEC,0x83,0xC5,0x02,0x31,0xE4,0x3E,0x89,0x46,0x00); s.jmp16("fetch")
-            # 新設 NOP 命令 (0x0E) : アドレス固定長化の最強の武器
             s.label("chk_E"); s.emit(0x3C,0x0E); s.jcc8(0x75,"chk_F"); s.jmp16("fetch")
             s.label("chk_F"); s.emit(0x3C,0x0F); s.jcc8(0x75,"end_exec"); s.label("wait_cr2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_cr2"); s.emit(0xB0,0x0D,0xBA,0xF8,0x03,0xEE); s.label("wait_lf2"); s.emit(0xBA,0xFD,0x03,0xEC,0xA8,0x20); s.jcc8(0x74,"wait_lf2"); s.emit(0xB0,0x0A,0xBA,0xF8,0x03,0xEE); s.jmp16("repl_start")
             s.label("end_exec"); s.jmp16("fetch")
@@ -110,17 +106,19 @@ jobs:
         class A:
             def __init__(self): self.o=[]; self.l={}; self.f=[]
             def emit(self,c): self.o.append(c)
-            # 全ての数値を「完全に同じ長さ（33命令）」で生成する固定長アルゴリズム！
+            # PUSHする数値を生成
             def pv(self,n):
                 self.emit(0)
                 for i in range(15,-1,-1):
                     self.emit(2)
                     self.emit(3 if (n>>i)&1 else 14)
             def lb(self,n): self.l[n]=len(self.o)
+            # ラベルへの参照を生成（固定長）
             def pr(self,n):
                 p=len(self.o)
                 for _ in range(33): self.emit(0)
                 self.f.append((p,n))
+            # アドレス解決
             def res(self):
                 for p,n in self.f:
                     d=self.l[n]
@@ -129,21 +127,41 @@ jobs:
                         self.o[p+1+i*2]=2
                         self.o[p+2+i*2]=3 if (d>>(15-i))&1 else 14
         a=A()
-        a.pv(4); a.pv(0); a.emit(7)
-        a.pv(0); a.pv(1); a.emit(7)
-        a.lb("L"); a.emit(13); a.emit(4); a.pv(0); a.emit(9); a.pr("H"); a.emit(10)
-        a.emit(4); a.pv(0x20); a.emit(9); a.pr("H1"); a.emit(10)
-        a.emit(4); a.pv(0xE3); a.emit(9); a.pr("H2"); a.emit(10)
-        a.emit(5); a.pr("L"); a.emit(11)
-        a.lb("H1"); a.emit(5); a.pv(1); a.emit(6); a.emit(2); a.pv(1); a.emit(7)
-        a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.pv(0); a.emit(7); a.pr("C"); a.emit(11)
-        a.lb("H2"); a.emit(5); a.emit(13); a.emit(5); a.emit(13); a.emit(5)
-        a.pv(1); a.emit(6); a.emit(2); a.emit(3); a.pv(1); a.emit(7)
-        a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.pv(0); a.emit(7); a.pr("C"); a.emit(11)
-        a.lb("C"); a.pv(0); a.emit(6); a.pr("E"); a.emit(10); a.pr("L"); a.emit(11)
-        a.lb("E"); a.pv(1); a.emit(6); a.emit(12); a.pv(4); a.pv(0); a.emit(7)
-        a.pv(0); a.pv(1); a.emit(7); a.pr("L"); a.emit(11)
-        a.lb("H"); a.emit(5); a.emit(15)
+        # [重要修正] STOREの引数順は「アドレス」が先、「値」が後！
+        a.pv(0); a.pv(4); a.emit(7) # mem[0] = 4
+        a.pv(1); a.pv(0); a.emit(7) # mem[1] = 0
+        
+        a.lb("L"); a.emit(13) # IN
+        a.emit(4); a.pv(0); a.emit(9); a.pr("H"); a.emit(10) # if char-0 == 0 jmp H
+        a.emit(4); a.pv(0x20); a.emit(9); a.pr("H1"); a.emit(10) # if char-0x20 == 0 jmp H1
+        a.emit(4); a.pv(0xE3); a.emit(9); a.pr("H2"); a.emit(10) # if char-0xE3 == 0 jmp H2
+        a.emit(5); a.pr("L"); a.emit(11) # POP char, JMP L
+
+        a.lb("H1")
+        a.emit(5) # POP char
+        a.pv(1); a.pv(1); a.emit(6); a.emit(2); a.emit(7) # mem[1] = mem[1]<<1
+        a.pv(0); a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.emit(7) # mem[0] -= 1
+        a.pr("C"); a.emit(11)
+
+        a.lb("H2")
+        a.emit(5); a.emit(13); a.emit(5); a.emit(13); a.emit(5) # skip utf8 trail
+        a.pv(1); a.pv(1); a.emit(6); a.emit(2); a.emit(3); a.emit(7) # mem[1] = (mem[1]<<1)|1
+        a.pv(0); a.pv(0); a.emit(6); a.pv(1); a.emit(9); a.emit(7) # mem[0] -= 1
+        a.pr("C"); a.emit(11)
+
+        a.lb("C")
+        a.pv(0); a.emit(6); a.pr("E"); a.emit(10) # if mem[0]==0 jmp E
+        a.pr("L"); a.emit(11)
+
+        a.lb("E")
+        a.pv(1); a.emit(6); a.emit(12) # OUT mem[1]
+        a.pv(0); a.pv(4); a.emit(7) # mem[0] = 4
+        a.pv(1); a.pv(0); a.emit(7) # mem[1] = 0
+        a.pr("L"); a.emit(11)
+
+        a.lb("H")
+        a.emit(5); a.emit(15) # POP char, HALT
+        
         a.res()
         sys.stdout.buffer.write(bytes(a.o))
         EOF

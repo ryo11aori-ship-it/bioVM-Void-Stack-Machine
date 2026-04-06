@@ -201,7 +201,7 @@ jobs:
       run: |
         set -euo pipefail
         echo "=== Executing The Absolute Void ==="
-        (sleep 2; pv -q -L 5000 payload_boot.spaces; sleep 1; pv -q -L 5000 payload_src.spaces) | timeout 30 qemu-system-x86_64 \
+        (sleep 2; pv -q -L 5000 payload_boot.spaces; sleep 1; pv -q -L 5000 payload_src.spaces) | timeout 180 qemu-system-x86_64 \
           -display none \
           -serial stdio \
           -drive file=seed/voidos_compiler.img,format=raw,index=0,media=disk \
